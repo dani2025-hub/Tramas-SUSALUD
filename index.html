@@ -210,8 +210,9 @@
   .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 
   /* RESULT STATS */
-  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
-  @media(max-width:600px) { .stats-row { grid-template-columns:1fr; } }
+  .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 1rem; }
+  @media(max-width:768px) { .stats-row { grid-template-columns: repeat(3,1fr); } }
+  @media(max-width:480px) { .stats-row { grid-template-columns:1fr; } }
   .stat-box {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -267,7 +268,7 @@
   <div class="logo-mark">RIS6</div>
   <div class="header-title">
     <span>Sistema de Tramas — ESTADISTICA</span>
-    <span>Generador de tramas B1 · B2 · F · G &nbsp;|&nbsp; Procesamiento Local</span>
+    <span>Generador de tramas B1 · B2 · F · G · I &nbsp;|&nbsp; Procesamiento Local</span>
   </div>
   <div class="header-spacer"></div>
   <span class="status-dot" id="hdrDot"></span>
@@ -323,6 +324,22 @@
     <div class="notice mt-1" style="margin-bottom:1rem;">
       <span class="icon">⚠️</span>
       <span>Archivos Excel: <strong>CATALOGO_PROCEDIMIENTOS</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">CODIGO, DENOMINACION</code>).</span>
+    </div>
+
+    <div class="notice mt-1" style="margin-bottom:1rem; border-color:rgba(0,136,255,.3); background:rgba(0,136,255,.05);">
+      <span class="icon">📤</span>
+      <span><strong>TRAMA I — REFERENCIAS:</strong> Cargue el archivo <strong>Trama_Susalud.xls</strong> (reporte HTML de referencias de REFCON). Es <em>opcional</em> — si no se carga, la TRAMA I se omite del Excel de salida.</span>
+    </div>
+
+    <!-- TRAMA I: Susalud file drop — separado visualmente -->
+    <div style="margin-bottom:1rem;">
+      <div class="file-drop" id="dropSusalud" style="border-color:rgba(0,136,255,.4); max-width:340px;">
+        <input type="file" id="fileSusalud" accept=".xls,.html,.htm">
+        <div class="file-icon">🔄</div>
+        <div class="file-label" style="color:var(--accent2);">TRAMA I · REFCON Referencias</div>
+        <div class="file-name" id="nameSusalud">Sin archivo</div>
+        <div class="file-count" id="cntSusalud"></div>
+      </div>
     </div>
 
     <div class="file-grid">
@@ -388,18 +405,19 @@
     <div class="card">
       <div class="stats-row" id="statsRow"></div>
       <div class="btn-row mt-1" style="margin-bottom:1rem;">
-        <button class="btn btn-primary" id="btnDownload" onclick="descargarExcel()">⬇ Descargar Excel (B1 · B2 · F · G)</button>
+        <button class="btn btn-primary" id="btnDownload" onclick="descargarExcel()">⬇ Descargar Excel (B1 · B2 · F · G · I)</button>
       </div>
       <div class="preview-tabs">
         <button class="preview-tab active" onclick="showTab('B1',this)">TRAMA B1</button>
         <button class="preview-tab" onclick="showTab('B2',this)">TRAMA B2</button>
         <button class="preview-tab" onclick="showTab('F',this)">TRAMA F</button>
-        <button class="preview-tab" onclick="showTab('G',this)">TRAMA G</button>
+        <button class="preview-tab" onclick="showTab('I',this)">TRAMA I</button>
       </div>
       <div id="previewB1"></div>
       <div id="previewB2" class="hidden"></div>
       <div id="previewF" class="hidden"></div>
       <div id="previewG" class="hidden"></div>
+      <div id="previewI" class="hidden"></div>
     </div>
   </div>
 
@@ -411,12 +429,9 @@
 ============================================================ */
 let maestroData = null, nominalData = null, cie10Map = {};
 let upsMap = {}, procedimientosSet = new Set();
-let resultB1 = [], resultB2 = [], resultF = [], resultG = [];
+let resultB1 = [], resultB2 = [], resultF = [], resultG = [], resultI = [];
+let tramaISusaludData = null;
 let workbookOut = null;
-
-/* ============================================================
-   GRUPOS DE EDAD
-============================================================ */
 const GRUPOS_EDAD = [
   { code: 1,  label: 'Menores de 1 año', min: 0,  max: 0 },
   { code: 2,  label: '1 - 4 años',       min: 1,  max: 4 },
@@ -591,6 +606,54 @@ setupFileDrop('fileProc','dropProc','nameProc','cntProc', file => {
     checkReady();
   };
   reader.readAsArrayBuffer(file);
+});
+
+
+/* ── TRAMA I: Archivo TRAMA SUSALUD REFERENCIAS (HTML-XLS) ── */
+setupFileDrop('fileSusalud','dropSusalud','nameSusalud','cntSusalud', file => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    // El archivo es HTML disfrazado de XLS — parseamos con DOMParser
+    const text = e.target.result;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'text/html');
+    const tables = doc.querySelectorAll('table');
+
+    // Buscamos la tabla con datos (la que tiene encabezado Periodo, IPRESS...)
+    let dataTable = null;
+    for (const t of tables) {
+      const firstRow = t.querySelector('tr');
+      if (!firstRow) continue;
+      const cells = firstRow.querySelectorAll('td,th');
+      const texts = Array.from(cells).map(c => c.textContent.trim());
+      if (texts.includes('Periodo') || texts.includes('NumHistoria')) {
+        dataTable = t; break;
+      }
+    }
+
+    if (!dataTable) {
+      log('warn', 'TRAMA I: No se encontró tabla de datos en el archivo REFCON');
+      return;
+    }
+
+    const rows = dataTable.querySelectorAll('tr');
+    const headers = Array.from(rows[0].querySelectorAll('td,th')).map(c => c.textContent.trim());
+    tramaISusaludData = [];
+    for (let i = 1; i < rows.length; i++) {
+      const cells = Array.from(rows[i].querySelectorAll('td,th'));
+      if (cells.length < headers.length) continue;
+      const obj = {};
+      headers.forEach((h, j) => { obj[h] = (cells[j] ? cells[j].textContent.trim() : ''); });
+      // Filtrar filas vacías
+      if (Object.values(obj).every(v => v === '')) continue;
+      tramaISusaludData.push(obj);
+    }
+
+    document.getElementById('cntSusalud').textContent = tramaISusaludData.length.toLocaleString() + ' registros';
+    log('ok', `TRAMA I — REFCON cargado: ${tramaISusaludData.length.toLocaleString()} filas`);
+    log('info', `Columnas REFCON: ${headers.join(' | ')}`);
+  };
+  reader.readAsText(file, 'UTF-8');
 });
 
 function checkReady() {
@@ -1066,7 +1129,7 @@ function generarF() {
      Id_Paciente únicos con anio_actual_paciente=3 AND mes_actual_paciente=1
      AND codigo_item='90658'
   ──────────────────────────────────────────────────────────── */
-  {
+  /*{
     const agg = {};
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
@@ -1075,7 +1138,7 @@ function generarF() {
     });
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 17));
     log('ok', `Evento 17 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} niños esquema completo`);
-  }
+  }*/
 
   /* ── EVENTO 18: Niños 37 m. con ≥6 controles CRED ───────────
      Id_Paciente únicos con anio_actual_paciente=3 AND mes_actual_paciente=1
@@ -1083,7 +1146,7 @@ function generarF() {
      (misma fuente que ev.17; la validación de "≥6 controles" se realiza
       con el conteo de Id_Cita distintas asociadas al mismo paciente/item)
   ──────────────────────────────────────────────────────────── */
-  {
+  /*{
     // Agrupar citas CRED por paciente
     const pacCitas = {}; // idPac → { Set de id_cita, sexo, grupo }
     nominalData.forEach(r => {
@@ -1100,7 +1163,7 @@ function generarF() {
     });
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 18));
     log('ok', `Evento 18 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} niños ≥6 CRED`);
-  }
+  }*/
 
   rows.sort((a,b) => a.Evento_Cod - b.Evento_Cod || a.Sexo - b.Sexo || a.Grupo_Edad_Cod - b.Grupo_Edad_Cod);
   log('ok', `TRAMA F: ${rows.length} filas generadas`);
@@ -1154,10 +1217,112 @@ function generarG() {
 }
 
 /* ============================================================
+   TRAMA I — REFERENCIAS SUSALUD
+   Transforma Trama_Susalud (HTML-XLS) aplicando las mismas
+   reglas de la PLANTILLA_PARA_REFERENCIAS (hoja "febrero"):
+
+   Col 1  NumHistoria       → DATA!E  (tal cual)
+   Col 2  TipoDoc           → DATA!F  (tal cual)
+   Col 3  NumDoc            → DATA!G  con padding: IF(LEN=7,"0"&G,G)
+   Col 4  Sexo              → DATA!H  (tal cual)
+   Col 5  Edad              → DATA!I  (tal cual)
+   Col 6  ServicioOrigen    → DATA!J  (tal cual)
+   Col 7  CentroDestino     → DATA!K  con padding:
+            LEN=4 → "0000"&K | LEN=3 → "00000"&K | LEN=5 → "000"&K
+   Col 8  ServicioDestino   → DATA!L  (tal cual)
+   Col 9  Dx1               → DATA!M  (tal cual)
+   Col 10 tipoDx1           → IF(N=1,"01",IF(N=2,"02"))
+   Col 11 Dx2               → IF(O="",M,O)  — si vacío repite Dx1
+   Col 12 tipoDx2           → IF(tipoDx2="",tipoDx1,"0"&tipoDx2)
+   Col 13 FechaExteRef      → DATA!Q  (tal cual)
+   Col 14 FechaTramiteRef   → DATA!R  (tal cual)
+============================================================ */
+function generarI() {
+  log('info', 'Generando TRAMA I (Referencias REFCON)...');
+
+  if (!tramaISusaludData || tramaISusaludData.length === 0) {
+    log('warn', 'TRAMA I: No se cargó el archivo SUSALUD — se omite');
+    return [];
+  }
+
+  function padNumDoc(val) {
+    const s = (val || '').toString().trim();
+    if (s.length === 7) return '0' + s;
+    return s;
+  }
+
+  function padCentroDestino(val) {
+    const s = (val || '').toString().trim();
+    if (s.length === 4) return '0000' + s;
+    if (s.length === 3) return '00000' + s;
+    if (s.length === 5) return '000' + s;
+    return s;
+  }
+
+  function formatTipoDx(val) {
+    const n = parseInt(val, 10);
+    if (n === 1) return '01';
+    if (n === 2) return '02';
+    return (val || '').toString().trim();
+  }
+
+  function formatDx2(dx2, dx1) {
+    const v = (dx2 || '').toString().trim();
+    return v === '' || v === 'NaN' ? (dx1 || '').toString().trim() : v;
+  }
+
+  function formatTipoDx2(tipoDx2, tipoDx1) {
+    const v = (tipoDx2 || '').toString().trim();
+    if (v === '' || v === 'NaN') return formatTipoDx(tipoDx1);
+    const n = parseInt(v, 10);
+    if (n === 1) return '01';
+    if (n === 2) return '02';
+    return v;
+  }
+
+  const rows = tramaISusaludData.map(r => {
+    const numHistoria    = (r['NumHistoria']     || '').toString().trim();
+    const tipoDoc        = (r['TipoDoc']         || '').toString().trim();
+    const numDoc         = padNumDoc(r['NumDoc']);
+    const sexo           = (r['Sexo']            || '').toString().trim();
+    const edad           = (r['Edad']            || '').toString().trim();
+    const servicioOrigen = (r['ServicioOrigen']  || '').toString().trim();
+    const centroDestino  = padCentroDestino(r['CentroDestino']);
+    const servicioDestino= (r['ServicioDestino'] || '').toString().trim();
+    const dx1            = (r['Dx1']             || '').toString().trim();
+    const tipoDx1Raw     = (r['tipoDx1']         || '').toString().trim();
+    const tipoDx1        = formatTipoDx(tipoDx1Raw);
+    const dx2            = formatDx2(r['Dx2'], dx1);
+    const tipoDx2        = formatTipoDx2(r['tipoDx2'], tipoDx1Raw);
+    const fechaExt       = (r['FechaExteRef']    || '').toString().trim();
+    const fechaTram      = (r['FechaTramiteRef'] || '').toString().trim();
+
+    return {
+      'Nro_Historia':             numHistoria,
+      'Tipo_Doc_Identidad':       tipoDoc,
+      'Nro_Doc_Identidad':        numDoc,
+      'Sexo':                     sexo,
+      'Edad':                     edad,
+      'Servicio_Origen_UPS':      servicioOrigen,
+      'Centro_Destino':           centroDestino,
+      'Servicio_Destino_UPS':     servicioDestino,
+      'Dx_Principal':             dx1,
+      'Tipo_Dx_Principal':        tipoDx1,
+      'Dx_Secundario':            dx2,
+      'Tipo_Dx_Secundario':       tipoDx2,
+      'Fecha_Extension_Ref':      fechaExt,
+      'Fecha_Tramite_Ref':        fechaTram,
+    };
+  });
+
+  log('ok', `TRAMA I: ${rows.length} referencias transformadas`);
+  return rows;
+}
+
+/* ============================================================
    MAIN PROCESS
 ============================================================ */
 async function procesarTramas() {
-  // Validate
   const anio = document.getElementById('paramAnio').value.trim();
   const mes = document.getElementById('paramMes').value.trim();
   const ipress = document.getElementById('paramIpress').value.trim();
@@ -1179,21 +1344,25 @@ async function procesarTramas() {
   await sleep(50);
 
   try {
-    setProgress(10, 'Procesando TRAMA B1 (Agregado por Sexo y Edad)...');
+    setProgress(8, 'Procesando TRAMA B1 (Agregado por Sexo y Edad)...');
     await sleep(30);
     resultB1 = generarB1();
 
-    setProgress(35, 'Procesando TRAMA B2 (Morbilidad por CIE-10)...');
+    setProgress(28, 'Procesando TRAMA B2 (Morbilidad por CIE-10)...');
     await sleep(30);
     resultB2 = generarB2();
 
-    setProgress(60, 'Procesando TRAMA F (Eventos de Salud)...');
+    setProgress(48, 'Procesando TRAMA F (Eventos de Salud)...');
     await sleep(30);
     resultF = generarF();
 
-    setProgress(80, 'Procesando TRAMA G (Procedimientos CPMS × UPS)...');
+    setProgress(65, 'Procesando TRAMA G (Procedimientos CPMS × UPS)...');
     await sleep(30);
     resultG = generarG();
+
+    setProgress(80, 'Procesando TRAMA I (Referencias REFCON)...');
+    await sleep(30);
+    resultI = generarI();
 
     setProgress(93, 'Construyendo libro Excel...');
     await sleep(30);
@@ -1223,11 +1392,8 @@ function buildWorkbook() {
 
   // B1
   const wsB1 = XLSX.utils.json_to_sheet(resultB1.map(r => ({
-    'PERIODO': r.Periodo,
-    'IPRESS': r.IPRESS,
-    'UGIPRESS': r.UGIPRESS,
-    'SEXO': r.Sexo,
-    'GRUPO_EDAD': r.Grupo_Edad,
+    'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
+    'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
     'ATENCIONES_MEDICAS': r.Atenciones_Medicas,
     'ATENCIONES_NO_MEDICAS': r.Atenciones_No_Medicas,
     'ATENDIDOS_MES': r.Atendidos_Mes
@@ -1236,11 +1402,8 @@ function buildWorkbook() {
 
   // B2
   const wsB2 = XLSX.utils.json_to_sheet(resultB2.map(r => ({
-    'PERIODO': r.Periodo,
-    'IPRESS': r.IPRESS,
-    'UGIPRESS': r.UGIPRESS,
-    'SEXO': r.Sexo,
-    'GRUPO_EDAD': r.Grupo_Edad,
+    'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
+    'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
     'DIAGNOSTICO_CIE10': r.Diagnostico_CIE10,
     'TOTAL_ATENDIDOS': r.Total_Atendidos
   })));
@@ -1248,26 +1411,31 @@ function buildWorkbook() {
 
   // F
   const wsF = XLSX.utils.json_to_sheet(resultF.map(r => ({
-    'PERIODO': r.Periodo,
-    'IPRESS': r.IPRESS,
-    'UGIPRESS': r.UGIPRESS,
-    'SEXO': r.Sexo,
-    'GRUPO_EDAD': r.Grupo_Edad,
-    'COD_EVENTO': r.Evento_Cod,
-    'TOTAL': r.Total
+    'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
+    'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
+    'COD_EVENTO': r.Evento_Cod, 'TOTAL': r.Total
   })));
   XLSX.utils.book_append_sheet(wb, wsF, 'TRAMA_F');
 
   // G
   const wsG = XLSX.utils.json_to_sheet(resultG.map(r => ({
-    'PERIODO_REPORTE':       r.Periodo,
-    'CODIGO_IPRESS':         r.IPRESS,
-    'CODIGO_UGIPRESS':       r.UGIPRESS,
-    'CODIGO_PROCEDIMIENTO':  r.Cod_Procedimiento,
-    'TOTAL_PROCEDIMIENTOS':  r.Total_Procedimientos,
-    'CATALOGO_UPS':          r.Catalogo_UPS,
+    'PERIODO_REPORTE':      r.Periodo,
+    'CODIGO_IPRESS':        r.IPRESS,
+    'CODIGO_UGIPRESS':      r.UGIPRESS,
+    'CODIGO_PROCEDIMIENTO': r.Cod_Procedimiento,
+    'TOTAL_PROCEDIMIENTOS': r.Total_Procedimientos,
+    'CATALOGO_UPS':         r.Catalogo_UPS,
   })));
   XLSX.utils.book_append_sheet(wb, wsG, 'TRAMA_G');
+
+  // I — solo si hay datos
+  if (resultI.length > 0) {
+    const wsI = XLSX.utils.json_to_sheet(resultI);
+    XLSX.utils.book_append_sheet(wb, wsI, 'TRAMA_I');
+    log('ok', `TRAMA I añadida al libro: ${resultI.length} filas`);
+  } else {
+    log('warn', 'TRAMA I: sin datos — hoja no incluida en el Excel');
+  }
 
   workbookOut = wb;
 }
@@ -1290,7 +1458,7 @@ function showResults() {
   document.getElementById('resultsSection').classList.remove('hidden');
   document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  // Stats
+  const tramaILabel = resultI.length > 0 ? resultI.length.toLocaleString() : '—';
   document.getElementById('statsRow').innerHTML = `
     <div class="stat-box">
       <div class="stat-val">${resultB1.length.toLocaleString()}</div>
@@ -1308,32 +1476,43 @@ function showResults() {
       <div class="stat-val">${resultG.length.toLocaleString()}</div>
       <div class="stat-label">Filas TRAMA G</div>
     </div>
+    <div class="stat-box">
+      <div class="stat-val" style="color:var(--accent2)">${tramaILabel}</div>
+      <div class="stat-label">Filas TRAMA I</div>
+    </div>
   `;
 
-  renderTable('previewB1', resultB1.slice(0, 200).map(r => ({
+  renderTable('previewB1', resultB1.slice(0,200).map(r => ({
     'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
     'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
     'AT_MED': r.Atenciones_Medicas, 'AT_NO_MED': r.Atenciones_No_Medicas, 'ATENDIDOS': r.Atendidos_Mes
   })));
 
-  renderTable('previewB2', resultB2.slice(0, 200).map(r => ({
+  renderTable('previewB2', resultB2.slice(0,200).map(r => ({
     'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
     'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
     'CIE10': r.Diagnostico_CIE10, 'TOTAL': r.Total_Atendidos
   })));
 
-  renderTable('previewF', resultF.slice(0, 200).map(r => ({
+  renderTable('previewF', resultF.slice(0,200).map(r => ({
     'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
     'SEXO': r.Sexo, 'GRUPO_EDAD': r.Grupo_Edad,
     'COD_EVENTO': r.Evento_Cod, 'TOTAL': r.Total
   })));
 
-  renderTable('previewG', resultG.slice(0, 200).map(r => ({
+  renderTable('previewG', resultG.slice(0,200).map(r => ({
     'PERIODO': r.Periodo, 'IPRESS': r.IPRESS, 'UGIPRESS': r.UGIPRESS,
     'COD_PROCEDIMIENTO': r.Cod_Procedimiento,
     'TOTAL_PROCEDIMIENTOS': r.Total_Procedimientos,
     'CATALOGO_UPS': r.Catalogo_UPS,
   })));
+
+  if (resultI.length > 0) {
+    renderTable('previewI', resultI.slice(0,200));
+  } else {
+    document.getElementById('previewI').innerHTML =
+      '<div class="empty-state">Sin datos de TRAMA I — cargue el archivo SUSALUD antes de procesar</div>';
+  }
 }
 
 function renderTable(containerId, rows) {
@@ -1359,7 +1538,7 @@ function renderTable(containerId, rows) {
 }
 
 function showTab(name, btn) {
-  ['B1','B2','F','G'].forEach(t => {
+  ['B1','B2','F','G','I'].forEach(t => {
     document.getElementById('preview'+t).classList.toggle('hidden', t !== name);
   });
   document.querySelectorAll('.preview-tab').forEach(b => b.classList.remove('active'));
@@ -1368,14 +1547,16 @@ function showTab(name, btn) {
 
 function resetAll() {
   maestroData = null; nominalData = null; cie10Map = {};
-  upsMap = {}; procedimientosSet = new Set();
-  resultB1 = []; resultB2 = []; resultF = []; resultG = []; workbookOut = null;
-  ['Maestro','Nominal','Cie','Ups','Proc'].forEach(n => {
+  upsMap = {}; procedimientosSet = new Set(); tramaISusaludData = null;
+  resultB1 = []; resultB2 = []; resultF = []; resultG = []; resultI = []; workbookOut = null;
+  ['Maestro','Nominal','Cie','Ups','Proc','Susalud'].forEach(n => {
     document.getElementById('name'+n).textContent = 'Sin archivo';
     document.getElementById('cnt'+n).textContent = '';
     document.getElementById('drop'+n).classList.remove('loaded');
   });
-  ['fileMaestro','fileNominal','fileCie','fileUps','fileProc'].forEach(id => { document.getElementById(id).value = ''; });
+  ['fileMaestro','fileNominal','fileCie','fileUps','fileProc','fileSusalud'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
   document.getElementById('progressWrap').classList.remove('visible');
   document.getElementById('logPanel').classList.remove('visible');
   document.getElementById('logPanel').innerHTML = '';
