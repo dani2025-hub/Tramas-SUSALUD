@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sistema de Tramas HIS · MINSA</title>
+<title>Sistema de Tramas SUSALUD</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -264,10 +264,10 @@
 <body>
 
 <header>
-  <div class="logo-mark">HIS</div>
+  <div class="logo-mark">RIS6</div>
   <div class="header-title">
-    <span>Sistema de Tramas — MINSA</span>
-    <span>Generador B1 · B2 · F · G &nbsp;|&nbsp; Procesamiento Local</span>
+    <span>Sistema de Tramas — ESTADISTICA</span>
+    <span>Generador de tramas B1 · B2 · F · G &nbsp;|&nbsp; Procesamiento Local</span>
   </div>
   <div class="header-spacer"></div>
   <span class="status-dot" id="hdrDot"></span>
@@ -307,8 +307,24 @@
     <div class="card-title"><span class="icon">📂</span> Archivos de Entrada</div>
     <div class="notice mt-1" style="margin-bottom:1rem;">
       <span class="icon">⚠️</span>
-      <span>Archivos planos (.txt/.csv): <strong>MAESTROPACIENTE</strong> y <strong>NOMINALTRAMA</strong>. Archivos Excel: <strong>CATALOGO_CIE10</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">CODIGO_SIN_PUNTO, CODIGO_CON_PUNTO</code>), <strong>CATALOGO_UPS</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">ID_CODIGO, ID_HIS</code>), <strong>CATALOGO_PROCEDIMIENTOS</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">CODIGO, DENOMINACION</code>).</span>
+      <span>Archivos planos (.txt/.csv): <strong>MAESTROPACIENTE</strong> y <strong>NOMINALTRAMA</strong>.</span>
     </div>
+
+    <div class="notice mt-1" style="margin-bottom:1rem;">
+      <span class="icon">⚠️</span>
+      <span>Archivos Excel: <strong>CATALOGO_CIE10</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">CODIGO_SIN_PUNTO, CODIGO_CON_PUNTO</code>).</span>
+    </div>
+
+    <div class="notice mt-1" style="margin-bottom:1rem;">
+      <span class="icon">⚠️</span>
+      <span>Archivos Excel: <strong>CATALOGO_UPS</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">ID_CODIGO, ID_HIS</code>).</span>
+    </div>
+
+    <div class="notice mt-1" style="margin-bottom:1rem;">
+      <span class="icon">⚠️</span>
+      <span>Archivos Excel: <strong>CATALOGO_PROCEDIMIENTOS</strong> (cols: <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">CODIGO, DENOMINACION</code>).</span>
+    </div>
+
     <div class="file-grid">
       <div class="file-drop" id="dropMaestro">
         <input type="file" id="fileMaestro" accept=".txt,.csv">
@@ -871,19 +887,32 @@ function generarF() {
     log('info', `[Fila 1] Codigo_Item="${itemVal}" | Sexo="${sexoVal}" | Tipo_Dx="${tdVal}" | Valor_Lab="${vlabVal}" | Correlativo="${corrVal}" | AnioP="${anioP}" | MesP="${mesP}"`);
   }
 
-  /* ── EVENTO 6: Controles Prenatales ──────────────────────────
-     Id_Cita únicos con codigo_item LIKE 'Z359%'
+/* ── EVENTO 6: Controles Prenatales ──────────────────────────
+      Id_Paciente únicos con codigo_item in 
+      ('Z3591','Z3592','Z3593','Z3491','Z3492','Z3493')
   ──────────────────────────────────────────────────────────── */
   {
     const agg = {};
+    // Ampliamos el set con los nuevos códigos solicitados
+    const itemsPermitidos = new Set([
+      'Z3591', 'Z3592', 'Z3593', 
+      'Z3491', 'Z3492', 'Z3493'
+    ]);
+    
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
-      if (c.item.startsWith('Z359')) agregarAgg(agg, 'cita', c.sexo, c.grupo, c.idCita);
+      
+      // Validamos la existencia del código en el set
+      if (itemsPermitidos.has(c.item)) {
+        // Cambiamos el tipo de agregación de 'cita' a 'paciente' 
+        // y usamos c.idPac como identificador único
+        agregarAgg(agg, 'paciente', c.sexo, c.grupo, c.idPac);
+      }
     });
-    rows.push(...aggToRows(agg, periodo, ipress, ugipress, 6));
-    log('ok', `Evento 6 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} citas únicas`);
-  }
 
+    rows.push(...aggToRows(agg, periodo, ipress, ugipress, 6));
+    log('ok', `Evento 6 → ${Object.values(agg).reduce((s, v) => s + v.ids.size, 0)} pacientes únicos`);
+  }
   /* ── EVENTO 7: Casos Nuevos TBC Pulmonar ─────────────────────
      Id_Paciente únicos con codigo_item='A150' AND Tipo_Dx='D' AND Valor_Lab='ST'
   ──────────────────────────────────────────────────────────── */
@@ -899,104 +928,138 @@ function generarF() {
   }
 
   /* ── EVENTO 9: TBC MDR/XDR ───────────────────────────────────
-     Id_Cita únicos donde ESA MISMA CITA tiene:
-       condición A: codigo_item='99214' AND Id_Correlativo_Lab=1 AND Valor_Lab='TBC'
-       condición B: codigo_item='99214' AND Id_Correlativo_Lab=2 AND Valor_Lab='2'
+      Id_Cita únicos donde ESA MISMA CITA tiene:
+        condición A: codigo_item='99214' AND Id_Correlativo_Lab=1 AND Valor_Lab='TBC'
+        condición B: codigo_item='99214' AND Id_Correlativo_Lab=2 AND Valor_Lab='2'
+        condición C: codigo_item='A150'  AND Tipo_Dx='D'
   ──────────────────────────────────────────────────────────── */
   {
-    // Primero indexar las citas que cumplen A y B por separado
     const citasA = new Set();
     const citasB = new Set();
-    // Guardar contexto (sexo/grupo) por id_cita
+    const citasC = new Set();
     const citaCtx = {};
 
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
-      if (c.item !== '99214') return;
-      if (!citaCtx[c.idCita]) citaCtx[c.idCita] = { sexo: c.sexo, grupo: c.grupo, idPac: c.idPac };
-      if (c.corr === 1 && c.vlab === 'TBC') citasA.add(c.idCita);
-      if (c.corr === 2 && c.vlab === '2')   citasB.add(c.idCita);
-    });
+      
+      // Guardamos el contexto para poder usarlo después en la agregación
+      if (!citaCtx[c.idCita]) {
+        citaCtx[c.idCita] = { sexo: c.sexo, grupo: c.grupo, idPac: c.idPac };
+      }
 
-    // Intersección: citas que cumplen AMBAS condiciones
-    const agg = {};
-    citasA.forEach(idCita => {
-      if (citasB.has(idCita)) {
-        const ctx = citaCtx[idCita];
-        if (ctx) agregarAgg(agg, 'cita', ctx.sexo, ctx.grupo, idCita);
+      // Evaluación de condiciones por fila dentro de la misma cita
+      if (c.item === '99214') {
+        if (c.corr === 1 && c.vlab === 'TBC') citasA.add(c.idCita);
+        if (c.corr === 2 && c.vlab === '2')   citasB.add(c.idCita);
+      }
+      
+      if (c.item === 'A150' && c.td === 'D') {
+        citasC.add(c.idCita);
       }
     });
+
+    // Intersección: La cita debe existir en A AND B AND C
+    const agg = {};
+    citasA.forEach(idCita => {
+      if (citasB.has(idCita) && citasC.has(idCita)) {
+        const ctx = citaCtx[idCita];
+        if (ctx) {
+          agregarAgg(agg, 'cita', ctx.sexo, ctx.grupo, idCita);
+        }
+      }
+    });
+
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 9));
-    log('ok', `Evento 9 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} citas únicas MDR/XDR`);
+    log('ok', `Evento 9 → ${Object.values(agg).reduce((s, v) => s + v.ids.size, 0)} citas únicas MDR/XDR`);
   }
 
   /* ── EVENTO 10: Casos Nuevos HIV ─────────────────────────────
-     Id_Cita únicos con codigo_item='B240' AND Tipo_Dx='D'
+      Id_Cita únicos con codigo_item LIKE 'Z21X%' AND Tipo_Dx='D'
   ──────────────────────────────────────────────────────────── */
   {
     const agg = {};
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
-      if (c.item === 'B240' && c.td === 'D') agregarAgg(agg, 'cita', c.sexo, c.grupo, c.idCita);
+      
+      // Filtramos por el prefijo 'Z21X' y tipo de diagnóstico Definitivo ('D')
+      if (c.item.startsWith('Z21X') && c.td === 'D') {
+        agregarAgg(agg, 'cita', c.sexo, c.grupo, c.idCita);
+      }
     });
+
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 10));
-    log('ok', `Evento 10 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} citas únicas HIV`);
+    log('ok', `Evento 10 → ${Object.values(agg).reduce((s, v) => s + v.ids.size, 0)} citas únicas HIV`);
   }
 
   /* ── EVENTO 14: Gestantes con TBC confirmada ─────────────────
-     Id_Cita únicos donde ESA MISMA CITA tiene:
-       condición A: codigo_item LIKE 'Z359%'
-       condición B: codigo_item='A150' AND Tipo_Dx='D'
+      Id_Cita únicos donde ESA MISMA CITA tiene:
+        OPCIÓN 1: (LIKE 'Z359%' AND item='A150' AND Tipo_Dx='D')
+        OPCIÓN 2: (item='O980' AND Tipo_Dx='D')
   ──────────────────────────────────────────────────────────── */
   {
-    const citasA = new Set();
-    const citasB = new Set();
+    const citasZ359 = new Set();
+    const citasA150 = new Set();
+    const citasO980 = new Set();
     const citaCtx = {};
 
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
-      if (!citaCtx[c.idCita]) citaCtx[c.idCita] = { sexo: c.sexo, grupo: c.grupo };
-      if (c.item.startsWith('Z359'))             citasA.add(c.idCita);
-      if (c.item === 'A150' && c.td === 'D')     citasB.add(c.idCita);
+      
+      // Guardamos el contexto de la cita (sexo, grupo)
+      if (!citaCtx[c.idCita]) {
+        citaCtx[c.idCita] = { sexo: c.sexo, grupo: c.grupo };
+      }
+
+      // Evaluación de condiciones
+      if (c.item.startsWith('Z359')) {
+        citasZ359.add(c.idCita);
+      }
+      
+      if (c.item === 'A150' && c.td === 'D') {
+        citasA150.add(c.idCita);
+      }
+
+      if (c.item === 'O980' && c.td === 'D') {
+        citasO980.add(c.idCita);
+      }
     });
 
     const agg = {};
-    citasA.forEach(idCita => {
-      if (citasB.has(idCita)) {
+    
+    // Iteramos sobre todas las citas procesadas para verificar el cumplimiento de las reglas
+    Object.keys(citaCtx).forEach(idCita => {
+      const cumpleOpcion1 = citasZ359.has(idCita) && citasA150.has(idCita);
+      const cumpleOpcion2 = citasO980.has(idCita);
+
+      if (cumpleOpcion1 || cumpleOpcion2) {
         const ctx = citaCtx[idCita];
-        if (ctx) agregarAgg(agg, 'cita', ctx.sexo, ctx.grupo, idCita);
+        agregarAgg(agg, 'cita', ctx.sexo, ctx.grupo, idCita);
       }
     });
+
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 14));
-    log('ok', `Evento 14 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} citas únicas Gestante+TBC`);
+    log('ok', `Evento 14 → ${Object.values(agg).reduce((s, v) => s + v.ids.size, 0)} citas únicas Gestante+TBC`);
   }
 
   /* ── EVENTO 15: Gestantes con HIV confirmado ─────────────────
-     Id_Cita únicos donde ESA MISMA CITA tiene:
-       condición A: codigo_item LIKE 'Z359%'
-       condición B: codigo_item='86318.03' AND Id_Correlativo_Lab=2 AND Valor_Lab='RP'
+      Id_Cita únicos donde ESA MISMA CITA tiene:
+        condición A: codigo_item IN ('O987','Z21X2') AND Tipo_Dx='D'
   ──────────────────────────────────────────────────────────── */
   {
-    const citasA = new Set();
-    const citasB = new Set();
-    const citaCtx = {};
+    const agg = {};
+    const itemsPermitidos = new Set(['O987', 'Z21X2']);
 
     nominalData.forEach(r => {
       const c = camposComunes(r, maestroMap);
-      if (!citaCtx[c.idCita]) citaCtx[c.idCita] = { sexo: c.sexo, grupo: c.grupo };
-      if (c.item.startsWith('Z359'))                                   citasA.add(c.idCita);
-      if (c.item === '86318.03' && c.corr === 2 && c.vlab === 'RP')   citasB.add(c.idCita);
-    });
 
-    const agg = {};
-    citasA.forEach(idCita => {
-      if (citasB.has(idCita)) {
-        const ctx = citaCtx[idCita];
-        if (ctx) agregarAgg(agg, 'cita', ctx.sexo, ctx.grupo, idCita);
+      // Validamos si el item está en la lista y si el diagnóstico es Definitivo ('D')
+      if (itemsPermitidos.has(c.item) && c.td === 'D') {
+        agregarAgg(agg, 'cita', c.sexo, c.grupo, c.idCita);
       }
     });
+
     rows.push(...aggToRows(agg, periodo, ipress, ugipress, 15));
-    log('ok', `Evento 15 → ${Object.values(agg).reduce((s,v)=>s+v.ids.size,0)} citas únicas Gestante+HIV`);
+    log('ok', `Evento 15 → ${Object.values(agg).reduce((s, v) => s + v.ids.size, 0)} citas únicas Gestante+HIV`);
   }
 
   /* ── EVENTO 17: Niños 37 m. esquema vacunación completo ──────
