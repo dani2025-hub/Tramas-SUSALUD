@@ -268,7 +268,7 @@
   <div class="logo-mark">RIS6</div>
   <div class="header-title">
     <span>Sistema de Tramas — ESTADISTICA</span>
-    <span>Generador de tramas B1 · B2 · F · G · I &nbsp;|&nbsp; Procesamiento Local</span>
+    <span>Generador de tramas B1 · B2 · F · G · I · J · A &nbsp;|&nbsp; Procesamiento Local</span>
   </div>
   <div class="header-spacer"></div>
   <span class="status-dot" id="hdrDot"></span>
@@ -399,9 +399,67 @@
     <div class="log-panel mt-2" id="logPanel"></div>
   </div>
 
+  <!-- TRAMA J & A -->
+  <div class="section-label">04 · Tramas RR.HH. — J &amp; A (TUASUSALUD)</div>
+  <div class="card">
+    <div class="card-title"><span class="icon">👨‍⚕️</span> Módulo TUASUSALUD → Trama J (Horas) &amp; Trama A (Personal)</div>
+
+    <div class="notice mt-1" style="margin-bottom:1rem; border-color:rgba(0,200,160,.3); background:rgba(0,200,160,.05);">
+      <span class="icon">📋</span>
+      <span><strong>Archivo TUASUSALUD:</strong> Cargue el reporte <code style="font-family:var(--mono);background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;">.xlsx</code> exportado desde TUASUSALUD (hoja "Data"). Se generarán automáticamente la <strong>Trama J</strong> (suma de horas por profesión × categoría de servicio) y la <strong>Trama A</strong> (recuento de personal único por grupo ocupacional).</span>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <div class="file-drop" id="dropTuasa" style="border-color:rgba(0,200,160,.4); max-width:380px;">
+        <input type="file" id="fileTuasa" accept=".xlsx,.xls">
+        <div class="file-icon">📊</div>
+        <div class="file-label" style="color:var(--accent);">TUASUSALUD — Archivo de turnos</div>
+        <div class="file-name" id="nameTuasa">Sin archivo</div>
+        <div class="file-count" id="cntTuasa"></div>
+      </div>
+    </div>
+
+    <!-- UNMAPPED SERVICES PANEL -->
+    <div id="tuasaUnmappedPanel" style="display:none; margin-bottom:1rem;">
+      <div class="notice" style="border-color:rgba(245,158,11,.3); background:rgba(245,158,11,.05); margin-bottom:.75rem;">
+        <span class="icon">⚠️</span>
+        <span>Los siguientes servicios no pudieron categorizarse automáticamente. Asigne su categoría antes de generar.</span>
+      </div>
+      <div id="tuasaUnmappedList"></div>
+    </div>
+
+    <!-- STATS -->
+    <div id="tuasaStats" style="display:none; margin-bottom:1rem;">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;">
+        <div class="stat-box"><div class="stat-val" id="tsStat1" style="color:var(--accent)">—</div><div class="stat-label">Registros</div></div>
+        <div class="stat-box"><div class="stat-val" id="tsStat2" style="color:var(--accent2)">—</div><div class="stat-label">Personal único</div></div>
+        <div class="stat-box"><div class="stat-val" id="tsStat3" style="color:var(--warn)">—</div><div class="stat-label">Total horas</div></div>
+        <div class="stat-box"><div class="stat-val" id="tsStat4">—</div><div class="stat-label">Sin mapear</div></div>
+      </div>
+    </div>
+
+    <div class="btn-row mt-2">
+      <button class="btn btn-primary" id="btnGenJA" onclick="generarJA()" disabled>
+        <span class="spinner" id="spinJA"></span>
+        Generar Trama J &amp; A
+      </button>
+      <button class="btn btn-secondary" id="btnDownloadJA" onclick="descargarJA()" style="display:none;">⬇ Descargar Excel J &amp; A</button>
+    </div>
+
+    <!-- PREVIEW J & A -->
+    <div id="jaPreviewSection" style="display:none; margin-top:1rem;">
+      <div class="preview-tabs">
+        <button class="preview-tab active" onclick="showTabJA('J',this)">TRAMA J</button>
+        <button class="preview-tab" onclick="showTabJA('A',this)">TRAMA A</button>
+      </div>
+      <div id="previewJ"></div>
+      <div id="previewA" class="hidden"></div>
+    </div>
+  </div>
+
   <!-- RESULTS -->
   <div id="resultsSection" class="hidden">
-    <div class="section-label">04 · Resultados</div>
+    <div class="section-label">05 · Resultados — Tramas Estadísticas</div>
     <div class="card">
       <div class="stats-row" id="statsRow"></div>
       <div class="btn-row mt-1" style="margin-bottom:1rem;">
@@ -411,6 +469,7 @@
         <button class="preview-tab active" onclick="showTab('B1',this)">TRAMA B1</button>
         <button class="preview-tab" onclick="showTab('B2',this)">TRAMA B2</button>
         <button class="preview-tab" onclick="showTab('F',this)">TRAMA F</button>
+        <button class="preview-tab" onclick="showTab('G',this)">TRAMA G</button>
         <button class="preview-tab" onclick="showTab('I',this)">TRAMA I</button>
       </div>
       <div id="previewB1"></div>
@@ -1385,6 +1444,424 @@ async function procesarTramas() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /* ============================================================
+   TRAMA J & A — TUASUSALUD MODULE
+============================================================ */
+// ── TABLA MAESTRA: PREFIJO DE SERVICIO → ACTIVIDAD (Imagen 1) ──────────────
+// Mapeo por prefijo exacto (antes del " : ")
+const JA_SERVICE_MAP = {
+  // ATENCION AMBULATORIA
+  'ATUE':  'ATENCION AMBULATORIA',   // ATUE : ATENCIÓN DE URGENCIAS Y EMERGENCIAS
+  'CE':    'ATENCION AMBULATORIA',   // CE : ATENCIÓN AMBULATORIA / CONSULTA MÉDICA
+  'FAR':   'ATENCION AMBULATORIA',   // FAR : DISPENSACIÓN FARMACÉUTICA
+  // OTRAS ACTIVIDADES
+  'ATASI': 'OTRAS ACTIVIDADES',      // ATASI : OTRAS ACTIVIDADES AUTORIZADAS
+  'SFAM':  'OTRAS ACTIVIDADES',      // SFAM : ATENCIÓN ITINERANTE / TELEORIENTACIÓN / VISITA DOM.
+  'SP':    'OTRAS ACTIVIDADES',      // SP : VIGILANCIA Y CONTROL (excepto CAPACITACION)
+  'COB':   'OTRAS ACTIVIDADES',      // COB : ATENCIÓN INMEDIATA RECIÉN NACIDO
+  'MR':    'OTRAS ACTIVIDADES',      // MR : ATENCIÓN DE REHABILITACIÓN
+  'NUT':   'OTRAS ACTIVIDADES',      // NUT : SOPORTE NUTRICIONAL
+  'ATG':   'OTRAS ACTIVIDADES',      // ATG : ATENCIÓN DE PARTO VAGINAL
+  // ADMINISTRATIVA
+  'ADM':   'ADMINISTRATIVA',         // ADM : OTRAS ACTIVIDADES AUTORIZADAS / AUDITORÍA / COORDINACIÓN
+  // PROCEDIMIENTOS
+  'PAT':   'PROCEDIMIENTOS',         // PAT : PROCEDIMIENTOS DE LABORATORIO
+  'COE':   'PROCEDIMIENTOS',
+  'APC':   'PROCEDIMIENTOS',
+};
+
+// Mapeo especial por subcadena para casos como "SP : CAPACITACION"
+// Se evalúa ANTES del mapeo por prefijo cuando hay coincidencia exacta de texto
+const JA_SERVICE_FULL_MAP = {
+  'SP : CAPACITACION': 'CAPACITACION',
+  'SP : CAPACITACIÓN': 'CAPACITACION',
+};
+
+// ── TABLA MAESTRA: CÓDIGO NUMÉRICO → GRUPO OCUPACIONAL (Imagen 2) ──────────
+const JA_PROF_GROUP = {
+  '00': 'AUXIL/TECNICOS',
+  '01': 'MEDICOS',
+  '02': 'FARMACEUTICO',
+  '03': 'ODONTOLOGO',
+  '04': 'OTROS',            // Colegio de Biólogos
+  '05': 'OBSTETRICES',
+  '06': 'ENFERMERAS',
+  '07': 'OTROS',            // Colegio de Trabajadores Sociales
+  '08': 'PSICOLOGOS',
+  '09': 'TECNOL. MEDICO',
+  '10': 'NUTRICIONISTAS',
+  '11': 'VETERINARIO',
+};
+
+// ── TABLA MAESTRA: ABREVIATURA PROFESIÓN → CÓDIGO (Imagen 3) ───────────────
+const JA_PROF_CODE_MAP = {
+  'TE':     '00',
+  'TF':     '00',
+  'TL':     '00',
+  'TRADIO': '00',
+  'AA':     '00',
+  'CMP':    '01',
+  'CQFP':   '02',
+  'COP':    '03',
+  'CBP':    '04',
+  'COPOBS': '05',
+  'CEP':    '06',
+  'CTSP':   '07',
+  'CPSP':   '08',
+  'CTMP':   '09',
+  'CNP':    '10',
+  'CMVP':   '11',
+};
+
+const JA_CATEGORIES = ['ATENCION AMBULATORIA','ADMINISTRATIVA','PROCEDIMIENTOS','OTRAS ACTIVIDADES','CAPACITACION'];
+const JA_GROUPS     = ['MEDICOS','ENFERMERAS','ODONTOLOGO','PSICOLOGOS','NUTRICIONISTAS','TECNOL. MEDICO','OBSTETRICES','FARMACEUTICO','AUXIL/TECNICOS','OTROS','VETERINARIO'];
+
+let tuasaRawData = [];       // array of {obj, rawRow} — obj has named fields, rawRow is the raw array
+let tuasaIngresoIdx = [];   // column indices of Ingreso cols (in order, day 1..31)
+let tuasaSalidaIdx  = [];   // column indices of Salida  cols (in order, day 1..31)
+let tuasaCustomMap = {};
+let tuasaUnmapped = {};
+let tuasaProcessed = [];
+let workbookJA = null;
+
+function jaGetCategory(svc) {
+  if (!svc) return null;
+  const s = String(svc).trim();
+  // 1. Override personalizado del usuario
+  if (tuasaCustomMap[s]) return tuasaCustomMap[s];
+  // 2. Coincidencia exacta por texto completo (ej. "SP : CAPACITACION")
+  const fullKey = Object.keys(JA_SERVICE_FULL_MAP).find(k => s.toUpperCase().startsWith(k.toUpperCase()));
+  if (fullKey) return JA_SERVICE_FULL_MAP[fullKey];
+  // 3. Mapeo por prefijo (antes del " : ")
+  const prefix = s.split(/\s*:\s*/)[0].trim().toUpperCase();
+  return JA_SERVICE_MAP[prefix] || null;
+}
+
+function jaGetProfCode(row) {
+  // Prioridad 1: columna CODIGO PROFESION ya calculada
+  const c = row['CODIGO PROFESION'];
+  if (c !== null && c !== undefined && c !== '') return String(c).trim().padStart(2,'0');
+  // Prioridad 2: derivar de la columna Profesión usando tabla maestra (Imagen 3)
+  const prof = String(row['Profesión'] || row['Profesion'] || '').trim().toUpperCase();
+  return JA_PROF_CODE_MAP[prof] || '00';
+}
+
+function jaGetTotalHours(entry) {
+  // entry is {obj, rawRow}
+  // First try the TOTAL HORAS named column (if it exists and is numeric)
+  const t = entry.obj['TOTAL HORAS'];
+  if (t !== null && t !== undefined && t !== '' && !isNaN(Number(t))) return Number(t);
+
+  // Calculate from raw Ingreso/Salida column pairs using stored indices
+  const rawRow = entry.rawRow;
+  let sum = 0;
+  const n = Math.min(tuasaIngresoIdx.length, tuasaSalidaIdx.length);
+  for (let d = 0; d < n; d++) {
+    const ing = rawRow[tuasaIngresoIdx[d]];
+    const sal = rawRow[tuasaSalidaIdx[d]];
+    if (ing && sal) {
+      const im = jaTimeMin(ing), sm = jaTimeMin(sal);
+      if (im !== null && sm !== null && sm > im) sum += (sm - im) / 60;
+    }
+  }
+  return sum;
+}
+
+function jaTimeMin(t) {
+  if (!t) return null;
+  const m = String(t).trim().match(/^(\d{1,2}):(\d{2})/);
+  return m ? parseInt(m[1])*60 + parseInt(m[2]) : null;
+}
+
+/* ── FILE LOAD ── */
+setupFileDrop('fileTuasa','dropTuasa','nameTuasa','cntTuasa', file => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const sheetName = wb.SheetNames.find(s => s.toLowerCase() === 'data') || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+      // Find header row: must contain 'Número Documento' or 'Numero Documento' or 'Servicio'
+      let headerRow = -1;
+      for (let i = 0; i < Math.min(8, raw.length); i++) {
+        if (raw[i] && raw[i].some(c => c && (
+          String(c).includes('Número Documento') ||
+          String(c).includes('Numero Documento') ||
+          String(c) === 'Servicio'
+        ))) { headerRow = i; break; }
+      }
+      if (headerRow === -1) { log('err', 'TUASUSALUD: No se encontró fila de encabezados'); return; }
+
+      const headers = raw[headerRow].map(h => h ? String(h).trim() : '');
+
+      // Detect ALL Ingreso and Salida column positions by scanning header array in order
+      // Headers are duplicated (e.g. "Ingreso","Ingreso","Ingreso"...) so we collect every occurrence
+      tuasaIngresoIdx = [];
+      tuasaSalidaIdx  = [];
+      headers.forEach((h, i) => {
+        const hn = h.toLowerCase().replace(/\s+/g,'');
+        if (hn === 'ingreso')  tuasaIngresoIdx.push(i);
+        if (hn === 'salida')   tuasaSalidaIdx.push(i);
+      });
+
+      log('info', `TUASUSALUD: ${tuasaIngresoIdx.length} columnas Ingreso, ${tuasaSalidaIdx.length} columnas Salida detectadas`);
+
+      // Build objects using first occurrence for each unique header name,
+      // but store raw row for Ingreso/Salida hour calculation
+      const seenHeaders = {};
+      const uniqueHeaders = headers.map((h, i) => {
+        if (!h) return '';
+        if (seenHeaders[h] === undefined) { seenHeaders[h] = i; return h; }
+        return `__dup_${h}_${i}`;  // Mark duplicates so we keep first occurrence in obj
+      });
+
+      tuasaRawData = raw.slice(headerRow + 1)
+        .filter(r => r && r.some(c => c !== null && c !== ''))
+        .map(rowArr => {
+          const obj = {};
+          uniqueHeaders.forEach((h, i) => {
+            if (h && !h.startsWith('__dup_')) obj[h] = rowArr[i];
+          });
+          return { obj, rawRow: rowArr };
+        });
+
+      document.getElementById('cntTuasa').textContent = tuasaRawData.length.toLocaleString() + ' registros';
+      log('ok', `TUASUSALUD cargado: ${tuasaRawData.length.toLocaleString()} filas — hoja "${sheetName}"`);
+
+      // scan unmapped — uses .obj
+      tuasaUnmapped = {};
+      tuasaRawData.forEach(entry => {
+        const s = String(entry.obj['Servicio']||'').trim();
+        if (s && !jaGetCategory(s)) tuasaUnmapped[s] = (tuasaUnmapped[s]||0) + 1;
+      });
+
+      // stats
+      const uniqDocs = new Set(tuasaRawData.map(e =>
+        String(e.obj['Número Documento']||e.obj['Numero Documento']||'').trim()
+      )).size;
+      const totalH = tuasaRawData.reduce((s, e) => s + (jaGetTotalHours(e)||0), 0);
+      document.getElementById('tsStat1').textContent = tuasaRawData.length.toLocaleString();
+      document.getElementById('tsStat2').textContent = uniqDocs.toLocaleString();
+      document.getElementById('tsStat3').textContent = totalH.toFixed(0);
+      document.getElementById('tsStat4').textContent = Object.keys(tuasaUnmapped).length;
+      document.getElementById('tuasaStats').style.display = '';
+
+      // render unmapped
+      const panel = document.getElementById('tuasaUnmappedPanel');
+      const list  = document.getElementById('tuasaUnmappedList');
+      const keys  = Object.keys(tuasaUnmapped);
+      if (keys.length) {
+        panel.style.display = '';
+        list.innerHTML = keys.map(svc => `
+          <div style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;">
+            <span style="flex:1;color:var(--muted);">${svc} <span style="color:var(--border)">(${tuasaUnmapped[svc]} reg.)</span></span>
+            <select style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;padding:.3rem .5rem;"
+              onchange="tuasaCustomMap['${svc.replace(/'/g,"\\'")}'] = this.value">
+              <option value="">— Seleccionar —</option>
+              ${JA_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+              <option value="IGNORAR">IGNORAR</option>
+            </select>
+          </div>`).join('');
+      } else {
+        panel.style.display = 'none';
+      }
+
+      document.getElementById('btnGenJA').disabled = false;
+    } catch(err) {
+      log('err', 'TUASUSALUD: Error al leer — ' + err.message);
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+/* ── GENERATE ── */
+function generarJA() {
+  if (!tuasaRawData.length) { log('warn', 'TUASUSALUD: No hay datos cargados'); return; }
+  document.getElementById('spinJA').classList.add('visible');
+  document.getElementById('btnGenJA').disabled = true;
+
+  setTimeout(() => {
+    try {
+      // Apply custom mappings and build processed list
+      tuasaProcessed = tuasaRawData.map(entry => {
+        const row    = entry.obj;
+        const svc      = String(row['Servicio']||'').trim();
+        const doc      = String(row['Número Documento']||row['Numero Documento']||'').trim();
+        const profCode = jaGetProfCode(row);
+        const hours    = jaGetTotalHours(entry) || 0;
+        let   category = jaGetCategory(svc);
+        if (!category) { const custom = tuasaCustomMap[svc]; category = (custom && custom !== 'IGNORAR') ? custom : null; }
+        const group    = String(row['CLASIFICACIÓN']||row['CLASIFICACION']||JA_PROF_GROUP[profCode]||'OTROS').trim();
+        return { svc, doc, profCode, hours, category, group };
+      });
+
+      // TRAMA J
+      const jData = {};
+      tuasaProcessed.forEach(r => {
+        if (!r.category || r.category === 'IGNORAR') return;
+        if (!jData[r.profCode]) jData[r.profCode] = {};
+        jData[r.profCode][r.category] = (jData[r.profCode][r.category]||0) + r.hours;
+      });
+
+      // TRAMA A
+      const personMap = {};
+      tuasaProcessed.forEach(r => {
+        if (!r.doc) return;
+        if (!personMap[r.doc]) personMap[r.doc] = {};
+        personMap[r.doc][r.profCode] = (personMap[r.doc][r.profCode]||0) + 1;
+      });
+      const aData = {};
+      Object.entries(personMap).forEach(([doc, codes]) => {
+        const primCode = Object.entries(codes).sort((a,b)=>b[1]-a[1])[0][0];
+        const group    = JA_PROF_GROUP[primCode] || 'OTROS';
+        if (!aData[primCode]) aData[primCode] = {};
+        aData[primCode][group] = (aData[primCode][group]||0) + 1;
+      });
+
+      const jCodes = Object.keys(jData).sort();
+      const aCodes = Object.keys(aData).sort();
+
+      // Build workbook
+      const wb = XLSX.utils.book_new();
+
+      // Sheet: TRAMA J
+      const jRows = [
+        ['TRAMA J','','','',''],
+        ['','','','',''],
+        ['Suma de TOTAL HORAS','Etiquetas de columna','','',''],
+        ['CODIGO PROFESION', ...JA_CATEGORIES],
+      ];
+      const jTots = {};
+      jCodes.forEach(code => {
+        const row = [code];
+        JA_CATEGORIES.forEach(cat => {
+          const v = (jData[code]&&jData[code][cat])||0;
+          jTots[cat] = (jTots[cat]||0) + v;
+          row.push(v||null);
+        });
+        jRows.push(row);
+      });
+      const jTotRow = ['Total general'];
+      JA_CATEGORIES.forEach(c => jTotRow.push(jTots[c]||null));
+      jRows.push(jTotRow);
+      const wsJ = XLSX.utils.aoa_to_sheet(jRows);
+      wsJ['!cols'] = [{wch:22},{wch:22},{wch:18},{wch:18},{wch:20}];
+      XLSX.utils.book_append_sheet(wb, wsJ, 'TRAMA J');
+
+      // Sheet: TRAMA A
+      const aRows = [
+        ['TRAMA A',...Array(JA_GROUPS.length).fill(''),''],
+        ['',...Array(JA_GROUPS.length).fill(''),''],
+        ['Recuento distinto de Número Documento','Etiquetas',...Array(JA_GROUPS.length-1).fill(''),''],
+        ['Etiquetas de fila',...JA_GROUPS,'Total (PEGAR EN TRAMA)'],
+      ];
+      const aTots = {};
+      aCodes.forEach(code => {
+        const row = [code];
+        let rt = 0;
+        JA_GROUPS.forEach(g => {
+          const v = (aData[code]&&aData[code][g])||0;
+          aTots[g] = (aTots[g]||0) + v; rt += v;
+          row.push(v||null);
+        });
+        row.push(rt||null);
+        aRows.push(row);
+      });
+      const aTotRow = ['Total (PEGAR EN TRAMA)'];
+      let grandA = 0;
+      JA_GROUPS.forEach(g => { aTotRow.push(aTots[g]||null); grandA += aTots[g]||0; });
+      aTotRow.push(grandA||null);
+      aRows.push(aTotRow);
+      const wsA = XLSX.utils.aoa_to_sheet(aRows);
+      wsA['!cols'] = [{wch:22},...JA_GROUPS.map(()=>({wch:15})),{wch:22}];
+      XLSX.utils.book_append_sheet(wb, wsA, 'TRAMA A');
+
+      workbookJA = wb;
+
+      // Render previews
+      renderJAPreviewJ(jData, jCodes);
+      renderJAPreviewA(aData, aCodes);
+
+      log('ok', `TRAMA J generada: ${jCodes.length} grupos profesión`);
+      log('ok', `TRAMA A generada: ${aCodes.length} grupos profesión — ${Object.keys(personMap).length} personas únicas`);
+
+      document.getElementById('jaPreviewSection').style.display = '';
+      document.getElementById('btnDownloadJA').style.display = '';
+    } catch(err) {
+      log('err', 'Error generando J&A: ' + err.message);
+    }
+
+    document.getElementById('spinJA').classList.remove('visible');
+    document.getElementById('btnGenJA').disabled = false;
+  }, 80);
+}
+
+function renderJAPreviewJ(jData, jCodes) {
+  let html = '<div class="table-wrap"><table><thead><tr><th>COD. PROFESION</th>';
+  JA_CATEGORIES.forEach(c => { html += `<th>${c}</th>`; });
+  html += '<th>TOTAL</th></tr></thead><tbody>';
+  const tots = {};
+  jCodes.forEach(code => {
+    let rt = 0;
+    html += `<tr><td style="color:var(--accent);font-weight:600">${code}</td>`;
+    JA_CATEGORIES.forEach(cat => {
+      const v = (jData[code]&&jData[code][cat])||0;
+      tots[cat] = (tots[cat]||0) + v; rt += v;
+      html += `<td style="${v?'':'color:var(--border)'}">${v||''}</td>`;
+    });
+    html += `<td style="color:var(--accent2);font-weight:600">${rt}</td></tr>`;
+  });
+  html += `<tr style="background:rgba(0,200,160,.07)"><td style="font-weight:700">Total general</td>`;
+  let grand = 0;
+  JA_CATEGORIES.forEach(c => { const v = tots[c]||0; grand+=v; html += `<td style="font-weight:700">${v||''}</td>`; });
+  html += `<td style="font-weight:700;color:var(--accent)">${grand}</td></tr>`;
+  html += '</tbody></table></div>';
+  document.getElementById('previewJ').innerHTML = html;
+}
+
+function renderJAPreviewA(aData, aCodes) {
+  let html = '<div class="table-wrap"><table><thead><tr><th>COD. PROFESION</th>';
+  JA_GROUPS.forEach(g => { html += `<th>${g}</th>`; });
+  html += '<th>TOTAL</th></tr></thead><tbody>';
+  const tots = {};
+  aCodes.forEach(code => {
+    let rt = 0;
+    html += `<tr><td style="color:var(--accent);font-weight:600">${code}</td>`;
+    JA_GROUPS.forEach(g => {
+      const v = (aData[code]&&aData[code][g])||0;
+      tots[g] = (tots[g]||0) + v; rt += v;
+      html += `<td style="${v?'':'color:var(--border)'}">${v||''}</td>`;
+    });
+    html += `<td style="color:var(--accent2);font-weight:600">${rt}</td></tr>`;
+  });
+  html += `<tr style="background:rgba(0,200,160,.07)"><td style="font-weight:700">Total</td>`;
+  let grand = 0;
+  JA_GROUPS.forEach(g => { const v = tots[g]||0; grand+=v; html += `<td style="font-weight:700">${v||''}</td>`; });
+  html += `<td style="font-weight:700;color:var(--accent)">${grand}</td></tr>`;
+  html += '</tbody></table></div>';
+  document.getElementById('previewA').innerHTML = html;
+}
+
+function showTabJA(name, btn) {
+  ['J','A'].forEach(t => {
+    document.getElementById('preview'+t).classList.toggle('hidden', t !== name);
+  });
+  document.querySelectorAll('#jaPreviewSection .preview-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function descargarJA() {
+  if (!workbookJA) return;
+  const ipress = (document.getElementById('paramIpress').value||'IPRESS').trim();
+  const anio   = document.getElementById('paramAnio').value.trim();
+  const mes    = (document.getElementById('paramMes').value||'').trim().padStart(2,'0');
+  XLSX.writeFile(workbookJA, `Tramas_JA_${ipress}_${anio}${mes}.xlsx`);
+  log('ok', `Descargado: Tramas_JA_${ipress}_${anio}${mes}.xlsx`);
+}
+
+/* ============================================================
    BUILD WORKBOOK
 ============================================================ */
 function buildWorkbook() {
@@ -1557,6 +2034,19 @@ function resetAll() {
   ['fileMaestro','fileNominal','fileCie','fileUps','fileProc','fileSusalud'].forEach(id => {
     document.getElementById(id).value = '';
   });
+  // Reset J & A
+  tuasaRawData = []; tuasaCustomMap = {}; tuasaUnmapped = {}; tuasaProcessed = []; workbookJA = null;
+  document.getElementById('nameTuasa').textContent = 'Sin archivo';
+  document.getElementById('cntTuasa').textContent = '';
+  document.getElementById('dropTuasa').classList.remove('loaded');
+  document.getElementById('fileTuasa').value = '';
+  document.getElementById('tuasaStats').style.display = 'none';
+  document.getElementById('tuasaUnmappedPanel').style.display = 'none';
+  document.getElementById('tuasaUnmappedList').innerHTML = '';
+  document.getElementById('jaPreviewSection').style.display = 'none';
+  document.getElementById('btnDownloadJA').style.display = 'none';
+  document.getElementById('btnGenJA').disabled = true;
+
   document.getElementById('progressWrap').classList.remove('visible');
   document.getElementById('logPanel').classList.remove('visible');
   document.getElementById('logPanel').innerHTML = '';
